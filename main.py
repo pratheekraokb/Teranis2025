@@ -165,7 +165,7 @@ if st.button("🚀 Generate Referral Code 🎯"):
 
 # ✅ Check if '/admin' is in the URL
 query_params = st.query_params
-is_admin_page = query_params.get("admin") == "true"
+is_admin_page = query_params.get("admin") == "True" 
 
 # 🔥 Only Show Content If /admin is in the URL
 if is_admin_page:
