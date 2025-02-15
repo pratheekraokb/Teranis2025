@@ -1,0 +1,56 @@
+{
+    "2BEEE24": {
+        "total_times_referred": 6,
+        "referral_details": {
+            "semester": "S2",
+            "class_section": "B",
+            "department": "EEE",
+            "roll_number": "24"
+        }
+    },
+    "2CEC32": {
+        "total_times_referred": 5,
+        "referral_details": {
+            "semester": "S2",
+            "class_section": "C",
+            "department": "EC",
+            "roll_number": "32"
+        }
+    },
+    "1ACE12": {
+        "total_times_referred": 5,
+        "referral_details": {
+            "semester": "S1",
+            "class_section": "A",
+            "department": "CE",
+            "roll_number": "12"
+        }
+    },
+    "8CCE25": {
+        "total_times_referred": 4,
+        "referral_details": {
+            "semester": "S8",
+            "class_section": "C",
+            "department": "CE",
+            "roll_number": "25"
+        }
+    },
+    "1CCS26": {
+        "total_times_referred": 4,
+        "referral_details": {
+            "semester": "S1",
+            "class_section": "C",
+            "department": "CS",
+            "roll_number": "26"
+        }
+    },
+    "1CCE14": {
+        "total_times_referred": 1,
+        "referral_details": {
+            "semester": "S1",
+            "class_section": "C",
+            "department": "CE",
+            "roll_number": "14"
+        }
+    }
+}
