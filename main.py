@@ -1,5 +1,8 @@
 import streamlit as st
 import re
+import requests
+import urllib.parse 
+
 st.set_page_config(page_title="Teranis Fest 2025", page_icon="🚀")
 class TeranisFunc:
     def decryptCode(code):
@@ -49,7 +52,45 @@ class TeranisFunc:
             return f"{semester}{class_section}{department}{roll_num:02d}"
         except Exception as e:
             return {"error": str(e)}
+
+BIN_ID = "67b0a667ad19ca34f804bd6f"
+BASE_URL = f"https://api.jsonbin.io/v3/b/{BIN_ID}"
+
+# Headers for JSONBin API requests
+HEADERS = {
+    "X-Master-Key": "$2a$10$S9wHAv5vOVXdfsgJz7VDKeigmYbO1hSYrtI6duiWwHLZYsJtUjpXa",
+    "Content-Type": "application/json"
+}
+
+# Funnction to fetch referral data
+def get_referral_data():
+    response = requests.get(BASE_URL, headers=HEADERS)
+    if response.status_code == 200:
+        return response.json().get("record", {}).get("referrals", {})
+    return {}
+
+
+# Function to update referral data
+def update_referral_data(referral_code):
+    # Get current referral data
+    data = get_referral_data()
+
+    # Update the referral count
+    if referral_code in data:
+        data[referral_code] += 1  # Increment count if exists
+    else:
+        data[referral_code] = 1  # Create new entry
+
+    # Prepare updated JSON structure
+    updated_data = {"referrals": data}
+
+    # Push updated data to JSONBin
+    response = requests.put(BASE_URL, json=updated_data, headers=HEADERS)
+    return response.status_code == 200
+
+
 # Custom CSS for Stylish UI
+
 st.markdown(
     """
     <style>
@@ -115,7 +156,22 @@ semester_value = int(semester[1:])
 # Convert "None" to an empty string
 division_value = "" if division == "None" else division
 
-# Submit Button
 if st.button("🚀 Generate Referral Code 🎯"):
     referral_code = TeranisFunc.encryptCode(semester_value, dept, division_value, roll_number)
     st.success(f"🎉 Your Referral Code is: **{referral_code}**")
+    update_referral_data(referral_code)
+
+    
+
+# ✅ Check if '/admin' is in the URL
+query_params = st.query_params
+is_admin_page = query_params.get("admin") == "true"
+
+# 🔥 Only Show Content If /admin is in the URL
+if is_admin_page:
+    st.title("🔐 Admin Panel")
+    st.write("View Referral Code Generation Stats")
+
+    if st.button("📜 Show Referral Database"):
+        data = get_referral_data()
+        st.json(data)  # Display JSON data in Streamlit
