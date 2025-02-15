@@ -86,7 +86,13 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
+hide_footer_style = """
+    <style>
+    footer {visibility: hidden;}
+    .stDeployButton {visibility: hidden;}
+    </style>
+"""
+st.markdown(hide_footer_style, unsafe_allow_html=True)
 
 # Title
 st.markdown("<h1>🚀 TERANIS 2025</h1>", unsafe_allow_html=True)

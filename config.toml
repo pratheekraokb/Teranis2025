@@ -1,0 +1,12 @@
+[theme]
+base="light"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+enableXsrfProtection = false
+
+[client]
+showFooter = false
+showSidebarNav = false
