@@ -35,7 +35,10 @@ venv\Scripts\activate  # Windows
 ```
 
 ### 4. Install Dependencies
-
+```
+pip install requirements.txt
+```
+### 5. Run the Project
 ```
 streamlit run main.py # Try this
 python3 -m streamlit run main.py # If above doesnt work, try this
