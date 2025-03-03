@@ -1,8 +1,6 @@
 import pandas as pd
-import json
-import re
-import os
-
+import os, io, re, json
+import random, string
 import streamlit as st
 JSON_FOLDER = "JSON_Files"
 os.makedirs(JSON_FOLDER, exist_ok=True)
@@ -110,12 +108,64 @@ class ExcelReferralFunc:
 
         return merged_data
 
+
+class Certification:
+    # Function to generate a unique 10-character code
+    def generate_unique_code(prefix, existing_codes):
+        """Generate a unique 10-character code with the given prefix."""
+        while True:
+            random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=7))
+            unique_code = prefix + random_part
+            if unique_code not in existing_codes:
+                existing_codes.add(unique_code)
+                return unique_code
+
+
+    # Function to process the Excel file
+    def process_excel(file, prefix):
+        """Process Excel file and generate unique codes."""
+        df = pd.read_excel(file)
+
+        # Identify column names dynamically
+        headers = df.columns.tolist()
+        name_col = next((col for col in headers if "name" in col.lower()), None)
+        email_col = next((col for col in headers if "email" in col.lower()), None)
+        phone_col = next((col for col in headers if "phone" in col.lower()), None)
+        dept_col = next((col for col in headers if "department" in col.lower()), None)
+        sem_col = next((col for col in headers if "semester" in col.lower()), None)  # Optional
+
+        if not all([name_col, email_col, phone_col, dept_col]):
+            st.error("Required columns (Name, Email, Phone, Department) not found!")
+            return None, None
+
+        # Set to store unique codes
+        existing_codes = set()
+
+        # Generate unique codes
+        df["Unique Code"] = df.apply(lambda row: Certification.generate_unique_code(prefix, existing_codes), axis=1)
+
+        # Create JSON data
+        json_data = {}
+        for _, row in df.iterrows():
+            user_data = {
+                "name": row[name_col],
+                "email": row[email_col],
+                "phone": row[phone_col],
+                "department": row[dept_col]
+            }
+            if sem_col:  # Include semester only if it exists
+                user_data["semester"] = row[sem_col]
+
+            json_data[row["Unique Code"]] = user_data
+
+        return df, json_data
+
 # Page Configuration
 st.set_page_config(page_title="Teranis 2025 - Admin Panel", layout="wide")
 
 # Sidebar - Navigation Menu
 st.sidebar.title("📌 Navigation")
-menu_options = ["🏠 Home", "📂 Generate Each Event JSON", "📑 Merge JSON"]
+menu_options = ["🏠 Home", "📂 Generate Each Event JSON", "📑 Merge JSON", "Unique Code - Certification"]
 selected_option = st.sidebar.radio("Select an Option", menu_options)
 
 # Right Sidebar - Branding
@@ -214,6 +264,46 @@ elif selected_option == "📑 Merge JSON":
                 mime="application/json"
             )
 
+elif selected_option == "Unique Code - Certification":
+    st.subheader("Options")
+    uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+    prefix = st.text_input("Enter 3-Letter Prefix", max_chars=3, value="ABC").upper()
+    output_excel_name = st.text_input("Excel Filename", value="output.xlsx")
+    output_json_name = st.text_input("JSON Filename", value="output.json")
+
+    if st.button("Generate Unique Codes"):
+        if uploaded_file is None:
+            st.warning("Please upload an Excel file first.")
+        elif len(prefix) != 3:
+            st.warning("Prefix must be exactly 3 letters.")
+        else:
+            # Process the file
+            df, json_data = Certification.process_excel(uploaded_file, prefix)
+
+            if df is not None:
+                # Ensure directories exist
+                os.makedirs("Certifications/Excel", exist_ok=True)
+                os.makedirs("Certifications/JSON", exist_ok=True)
+
+                # Define file paths
+                excel_path = f"Certifications/Excel/{output_excel_name}"
+                json_path = f"Certifications/JSON/{output_json_name}"
+
+                # Save Excel file
+                df.to_excel(excel_path, index=False, engine="openpyxl")
+
+                # Save JSON file
+                with open(json_path, "w") as json_file:
+                    json.dump(json_data, json_file, indent=4)
+
+                # Display success message
+                st.success("✅ Unique codes generated successfully!")
+                st.write(f"📂 Excel File Saved at: `{excel_path}`")
+                st.write(f"📂 JSON File Saved at: `{json_path}`")
+
+                # Show Data Preview
+                st.subheader("📌 Data Preview")
+                st.dataframe(df.head())
 # Footer
 st.markdown("---")
 st.markdown("© **Teranis 2025 - LBS College of Engineering**")
