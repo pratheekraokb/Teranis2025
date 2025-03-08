@@ -2,6 +2,18 @@ import pandas as pd
 import os, io, re, json
 import random, string
 import streamlit as st
+
+
+# certifications
+
+import os
+import glob
+import shutil
+import zipfile
+import pandas as pd
+import streamlit as st
+from difflib import get_close_matches
+
 JSON_FOLDER = "JSON_Files"
 os.makedirs(JSON_FOLDER, exist_ok=True)
 
@@ -119,18 +131,33 @@ class Certification:
             if unique_code not in existing_codes:
                 existing_codes.add(unique_code)
                 return unique_code
+            
+    def combine_json_files(uploaded_files):
+        combined_data = {}
+
+        for uploaded_file in uploaded_files:
+            try:
+                data = json.load(uploaded_file)
+                if isinstance(data, dict):
+                    combined_data.update(data)  # Merge JSON objects based on unique keys
+                else:
+                    st.error(f"Invalid JSON format in file: {uploaded_file.name} (Expected a dictionary)")
+            except json.JSONDecodeError:
+                st.error(f"Error decoding JSON in file: {uploaded_file.name}")
+
+        return combined_data
 
 
     # Function to process the Excel file
-    def process_excel(file, prefix):
+    def process_excel(file, prefix, event_name, event_date, certificate_type, notes=""):
         """Process Excel file and generate unique codes."""
         df = pd.read_excel(file)
 
         # Identify column names dynamically
         headers = df.columns.tolist()
         name_col = next((col for col in headers if "name" in col.lower()), None)
-        email_col = next((col for col in headers if "email" in col.lower()), None)
-        phone_col = next((col for col in headers if "phone" in col.lower()), None)
+        email_col = next((col for col in headers if "email" in col.lower()), "")
+        phone_col = next((col for col in headers if "phone" in col.lower()), "")
         dept_col = next((col for col in headers if "department" in col.lower()), None)
         sem_col = next((col for col in headers if "semester" in col.lower()), None)  # Optional
 
@@ -148,10 +175,15 @@ class Certification:
         json_data = {}
         for _, row in df.iterrows():
             user_data = {
-                "name": row[name_col],
-                "email": row[email_col],
-                "phone": row[phone_col],
-                "department": row[dept_col]
+                "name": str(row.get(name_col, "")).upper(),
+                "email": row.get(email_col, ""),
+                "phone": row.get(phone_col, ""),
+                "department": row.get(dept_col, ""),        # eg CS, EC, 
+                "semester": row.get(sem_col, ""),        # Include semester, default to empty string  eg S2 CS A
+                "event_name": str(event_name),              
+                "event_date": str(event_date),
+                "type_of_certificate": str(certificate_type),
+                "notes": str(notes)
             }
             if sem_col:  # Include semester only if it exists
                 user_data["semester"] = row[sem_col]
@@ -159,13 +191,84 @@ class Certification:
             json_data[row["Unique Code"]] = user_data
 
         return df, json_data
+    
+
+    def detect_column_name(df, target_keywords):
+        """Finds the best matching column name from a list of possible variations."""
+        df_columns = list(df.columns)  # Keep original column names
+        lower_to_original = {col.lower().strip(): col for col in df_columns}  # Map lowercase to original
+        df_columns_lower = list(lower_to_original.keys())  # Lowercase column names for matching
+
+        for keyword in target_keywords:
+            match = get_close_matches(keyword, df_columns_lower, n=1, cutoff=0.7)  # Fuzzy matching
+            if match:
+                return lower_to_original[match[0]]  # Return original column name
+        return None
+
+    def save_uploaded_file(uploaded_file, save_path):
+        """Save uploaded file to a specified path."""
+        with open(save_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+    def extract_zip(uploaded_zip, extract_to="Certificates"):
+        """Extracts the uploaded ZIP file to a folder."""
+        with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
+            zip_ref.extractall(extract_to)
+
+    def process_certificates(excel_file, certificates_path="Certificates"):
+        """Reads the Excel file, checks PNG count, and renames certificate files."""
+        try:
+            # Read Excel
+            df = pd.read_excel(excel_file)
+            
+            # Detect SL Number column
+            sl_number_column = Certification.detect_column_name(df, ["sl number", "sl no", "sl num", "serial no", "sl_num"])
+            if not sl_number_column:
+                return "Error: Could not find a valid 'SL Number' column."
+
+            unique_code_column = Certification.detect_column_name(df, ["unique code", "code", "unique id"])
+            if not unique_code_column:
+                return "Error: Could not find a valid 'Unique Code' column."
+
+            # Create dictionary mapping SL Number to Unique Code
+            mapping_dict = dict(zip(df[sl_number_column].astype(str), df[unique_code_column].astype(str)))
+
+            if not os.path.isdir(certificates_path):
+                return "Error: 'Certificates' folder not found."
+
+            # Get all PNG files
+            all_png_files = glob.glob(os.path.join(certificates_path, "**", "*.png"), recursive=True)
+
+            if len(all_png_files) != len(mapping_dict):
+                return f"Error: Mismatch - Found {len(all_png_files)} PNGs, expected {len(mapping_dict)}."
+
+            # Rename files
+            renamed_files = []
+            for sl_number, unique_code in mapping_dict.items():
+                old_path = os.path.join(certificates_path, f"{sl_number}.png")
+                new_path = os.path.join(certificates_path, f"{unique_code}.png")
+
+                if os.path.isfile(old_path):
+                    os.rename(old_path, new_path)
+                    renamed_files.append(f"Renamed {old_path} → {new_path}")
+
+            return renamed_files if renamed_files else "No files were renamed."
+
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    def zip_folder(folder_path, output_zip="Processed_Certificates.zip"):
+        """Zips the processed folder for download."""
+        shutil.make_archive(output_zip.replace(".zip", ""), 'zip', folder_path)
+        return output_zip
+
 
 # Page Configuration
 st.set_page_config(page_title="Teranis 2025 - Admin Panel", layout="wide")
 
 # Sidebar - Navigation Menu
 st.sidebar.title("📌 Navigation")
-menu_options = ["🏠 Home", "📂 Generate Each Event JSON", "📑 Merge JSON", "Unique Code - Certification"]
+menu_options = ["🏠 Home", "📂 Generate Each Event JSON", "📑 Merge JSON", "Unique Code - Certification", "Cerification - JSON Combiner", "Bulk Certifications Renamer (Sl Num -> Unique Code)"]
 selected_option = st.sidebar.radio("Select an Option", menu_options)
 
 # Right Sidebar - Branding
@@ -270,7 +373,14 @@ elif selected_option == "Unique Code - Certification":
     prefix = st.text_input("Enter 3-Letter Prefix", max_chars=3, value="ABC").upper()
     output_excel_name = st.text_input("Excel Filename", value="output.xlsx")
     output_json_name = st.text_input("JSON Filename", value="output.json")
+    event_name = st.text_input("Event Name", value="")
+    event_date = st.text_input("Event Date", value="")
 
+    certification_type = st.selectbox(
+        "Select the type of certification:", 
+        ["Certificate of Participation", "Certificate of Merit", "Certificate of Coordination"]
+    )
+    notes = st.text_input("Any Notes", value="")
     if st.button("Generate Unique Codes"):
         if uploaded_file is None:
             st.warning("Please upload an Excel file first.")
@@ -278,7 +388,7 @@ elif selected_option == "Unique Code - Certification":
             st.warning("Prefix must be exactly 3 letters.")
         else:
             # Process the file
-            df, json_data = Certification.process_excel(uploaded_file, prefix)
+            df, json_data = Certification.process_excel(uploaded_file, prefix, event_name=str(event_name), event_date = str(event_date), certificate_type=certification_type, notes=notes)
 
             if df is not None:
                 # Ensure directories exist
@@ -304,6 +414,62 @@ elif selected_option == "Unique Code - Certification":
                 # Show Data Preview
                 st.subheader("📌 Data Preview")
                 st.dataframe(df.head())
+
+elif selected_option == "Cerification - JSON Combiner":
+    st.write("Upload multiple JSON files, and they will be merged and saved.")
+
+    uploaded_files = st.file_uploader("Upload JSON files", type="json", accept_multiple_files=True)
+
+    if uploaded_files:
+        combined_json = Certification.combine_json_files(uploaded_files)
+
+        if combined_json:
+            st.success("JSON files combined successfully!")
+
+            # Ask user for filename
+            filename = st.text_input("Enter filename (without extension)", "combined")
+
+            if st.button("Save JSON"):
+                output_path = os.path.join("Certifications/", f"{filename}.json")
+
+                # Save the combined JSON to the specified directory
+                with open(output_path, "w", encoding="utf-8") as f:
+                    json.dump(combined_json, f, indent=4)
+
+                st.success(f"File saved at: `{output_path}`")
+
+elif selected_option == "Bulk Certifications Renamer (Sl Num -> Unique Code)":
+    st.title("Certificate Renamer 📜")
+
+    # Upload Excel File
+    excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+
+    # Upload ZIP Folder
+    zip_file = st.file_uploader("Upload Certificates Folder (ZIP)", type=["zip"])
+
+    if excel_file and zip_file:
+        # Save the uploaded Excel file
+        excel_path = "uploaded_excel.xlsx"
+        Certification.save_uploaded_file(excel_file, excel_path)
+
+        # Extract ZIP folder
+        Certification.extract_zip(zip_file)
+
+        # Process Certificates
+        if st.button("Process Certificates"):
+            result = Certification.process_certificates(excel_path)
+            if isinstance(result, list):
+                st.success("Renaming Completed!")
+                st.write("\n".join(result))
+
+                # Zip processed folder for download
+                zip_path = Certification.zip_folder("Certificates")
+                with open(zip_path, "rb") as f:
+                    st.download_button("Download Processed Certificates", f, file_name="Processed_Certificates.zip")
+            else:
+                st.error(result)
+
+
 # Footer
 st.markdown("---")
 st.markdown("© **Teranis 2025 - LBS College of Engineering**")
