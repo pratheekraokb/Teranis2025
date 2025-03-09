@@ -12,7 +12,23 @@ import shutil
 import zipfile
 import pandas as pd
 import streamlit as st
+import streamlit as st
+import cv2
+import json
+import os
+import zipfile
+import tempfile
+import qrcode
+import numpy as np
 from difflib import get_close_matches
+
+import cv2
+import numpy as np
+import qrcode
+import json
+from PIL import Image
+
+
 
 JSON_FOLDER = "JSON_Files"
 os.makedirs(JSON_FOLDER, exist_ok=True)
@@ -262,13 +278,185 @@ class Certification:
         shutil.make_archive(output_zip.replace(".zip", ""), 'zip', folder_path)
         return output_zip
 
+    def make_logo_transparent(logo_path):
+        """
+        Loads a logo and removes the white background to make it transparent.
+        """
+        # logo_cv = cv2.imread(logo_path, cv2.IMREAD_UNCHANGED)
+        logo_cv = cv2.imread(logo_path, cv2.IMREAD_UNCHANGED)
+        return Image.fromarray(logo_cv)
+
+    def generate_qr_with_logo(qr_url, logo_path):
+        qr = qrcode.QRCode(box_size=10, border=2)
+        qr.add_data(qr_url)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill="black", back_color="white").convert("RGBA")
+
+        if os.path.exists(logo_path):
+            logo = Image.open(logo_path)
+            qr_size = qr_img.size[0]
+            logo_size = qr_size // 4
+            logo = logo.resize((logo_size, logo_size))
+            pos = ((qr_size - logo_size) // 2, (qr_size - logo_size) // 2)
+            qr_img.paste(logo, pos, mask=logo if logo.mode == "RGBA" else None)
+        return qr_img
+
+
+
+
+    def overlay_qr_on_certificate(certificate_path, qr_path, save_path="certificate_with_qr.png"):
+        """
+        Overlays the generated QR code onto a certificate image based on user selection.
+        """
+        image = cv2.imread(certificate_path, cv2.IMREAD_UNCHANGED)
+        if image.shape[2] == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2BGRA)
+        
+        clone = image.copy()
+        rect = []
+        drawing = False
+        
+        def select_rectangle(event, x, y, flags, param):
+            nonlocal rect, drawing, clone
+            if event == cv2.EVENT_LBUTTONDOWN:
+                rect = [(x, y)]
+                drawing = True
+            elif event == cv2.EVENT_MOUSEMOVE and drawing:
+                clone = image.copy()
+                cv2.rectangle(clone, rect[0], (x, y), (0, 255, 0, 255), 2)
+                cv2.imshow("Select QR Area", clone)
+            elif event == cv2.EVENT_LBUTTONUP:
+                rect.append((x, y))
+                drawing = False
+                cv2.rectangle(clone, rect[0], rect[1], (0, 255, 0, 255), 2)
+                cv2.imshow("Select QR Area", clone)
+        
+        cv2.namedWindow("Select QR Area", cv2.WINDOW_NORMAL)
+        cv2.imshow("Select QR Area", image)
+        cv2.setMouseCallback("Select QR Area", select_rectangle)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        
+        if len(rect) == 2:
+            x1, y1 = rect[0]
+            x2, y2 = rect[1]
+            x1, x2 = min(x1, x2), max(x1, x2)
+            y1, y2 = min(y1, y2), max(y1, y2)
+            
+            with open("coordinates.json", "w") as json_file:
+                json.dump({"x1": x1, "y1": y1, "x2": x2, "y2": y2}, json_file, indent=4)
+            
+            # qr_img = Image.open(qr_path).convert("RGBA")
+            if isinstance(qr_path, str):
+                qr_img = Image.open(qr_path).convert("RGBA")
+            else:
+                qr_img = qr_path.convert("RGBA")  # If it's already an image object
+
+            qr_np = np.array(qr_img)
+            qr_resized = cv2.resize(qr_np, (x2 - x1, y2 - y1))
+            alpha_qr = qr_resized[:, :, 3] / 255.0
+            alpha_bg = 1.0 - alpha_qr
+            
+            for c in range(3):
+                image[y1:y2, x1:x2, c] = (alpha_qr * qr_resized[:, :, c] + alpha_bg * image[y1:y2, x1:x2, c])
+            image[y1:y2, x1:x2, 3] = (alpha_qr * 255 + alpha_bg * image[y1:y2, x1:x2, 3])
+            
+            cv2.imwrite(save_path, image)
+            return save_path
+        else:
+            raise ValueError("Invalid selection. Please select again.")
+
+
+    # Function to load coordinates from JSON
+    def load_coordinates():
+        if os.path.exists("qr_coordinates.json"):
+            with open("qr_coordinates.json", "r") as file:
+                return json.load(file)
+        return None
+
+    # Function to save coordinates to JSON
+    def save_coordinates(coords):
+        with open("qr_coordinates.json", "w") as file:
+            json.dump(coords, file)
+
+    # Function to resize image while keeping aspect ratio
+    def resize_image(image, max_width=1000, max_height=700):
+        h, w = image.shape[:2]
+        scale = min(max_width / w, max_height / h)
+        if scale < 1:
+            new_size = (int(w * scale), int(h * scale))
+            return cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
+        return image
+
+    # Function to allow OpenCV rectangle selection
+    def select_qr_position(image_path):
+        image = cv2.imread(image_path)
+        display_img = image.copy()
+        
+        global rect_start, rect_end, selecting
+        rect_start, rect_end, selecting = None, None, False
+
+        def onselect(event, x, y, flags, param):
+            global rect_start, rect_end, selecting
+            if event == cv2.EVENT_LBUTTONDOWN:
+                rect_start = (x, y)
+                selecting = True
+            elif event == cv2.EVENT_MOUSEMOVE and selecting:
+                temp_img = display_img.copy()
+                cv2.rectangle(temp_img, rect_start, (x, y), (0, 255, 0), 2)
+                cv2.imshow("Select QR Code Position", temp_img)
+            elif event == cv2.EVENT_LBUTTONUP:
+                rect_end = (x, y)
+                selecting = False
+                cv2.rectangle(display_img, rect_start, rect_end, (0, 255, 0), 2)
+                cv2.imshow("Select QR Code Position", display_img)
+
+        cv2.namedWindow("Select QR Code Position", cv2.WINDOW_NORMAL)
+        cv2.setMouseCallback("Select QR Code Position", onselect)
+        cv2.imshow("Select QR Code Position", display_img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        if rect_start and rect_end:
+            x1, y1 = rect_start
+            x2, y2 = rect_end
+            size = max(abs(x2 - x1), abs(y2 - y1))
+            coords = {"x": min(x1, x2), "y": min(y1, y2), "size": size}
+            return coords
+        return None
+    # Function to generate and place QR code **correctly**
+    def add_qr_to_image(image_path, qr_url, logo_path, coords):
+        image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+        if image is None or coords is None:
+            return None
+
+        qr_img_pil = Certification.generate_qr_with_logo(qr_url, logo_path)
+        qr_img_np = np.array(qr_img_pil)
+        qr_bgra = cv2.cvtColor(qr_img_np, cv2.COLOR_RGBA2BGRA)
+        qr_resized = cv2.resize(qr_bgra, (coords["size"], coords["size"]))
+
+        x, y = coords["x"], coords["y"]
+        if image.shape[2] == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2BGRA)
+
+        roi = image[y:y+coords["size"], x:x+coords["size"]]
+        alpha_qr = qr_resized[:, :, 3] / 255.0
+        alpha_bg = 1.0 - alpha_qr
+
+        for c in range(3):  
+            roi[:, :, c] = (alpha_qr * qr_resized[:, :, c] + alpha_bg * roi[:, :, c]).astype(np.uint8)
+
+        image[y:y+coords["size"], x:x+coords["size"]] = roi
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+    
+
 
 # Page Configuration
 st.set_page_config(page_title="Teranis 2025 - Admin Panel", layout="wide")
 
 # Sidebar - Navigation Menu
 st.sidebar.title("📌 Navigation")
-menu_options = ["🏠 Home", "📂 Generate Each Event JSON", "📑 Merge JSON", "Unique Code - Certification", "Cerification - JSON Combiner", "Bulk Certifications Renamer (Sl Num -> Unique Code)"]
+menu_options = ["🏠 Home", "📂 Generate Each Event JSON", "📑 Merge JSON", "Unique Code - Certification", "Cerification - JSON Combiner", "Bulk Certifications Renamer (Sl Num -> Unique Code)", "QR Code Insertion"]
 selected_option = st.sidebar.radio("Select an Option", menu_options)
 
 # Right Sidebar - Branding
@@ -468,6 +656,46 @@ elif selected_option == "Bulk Certifications Renamer (Sl Num -> Unique Code)":
                     st.download_button("Download Processed Certificates", f, file_name="Processed_Certificates.zip")
             else:
                 st.error(result)
+
+elif selected_option == "QR Code Insertion":
+    st.title("QR Code Certificate Generator")
+    uploaded_zip = st.file_uploader("Upload ZIP file containing certificates", type=["zip"])
+
+    if uploaded_zip:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path = os.path.join(temp_dir, "uploaded.zip")
+
+            with open(zip_path, "wb") as f:
+                f.write(uploaded_zip.getvalue())
+
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(temp_dir)
+                image_files = [os.path.join(temp_dir, f) for f in zip_ref.namelist() if f.endswith((".png", ".jpg", ".jpeg"))]
+
+            if image_files:
+                coordinates = Certification.select_qr_position(image_files[0])
+
+                output_zip_path = os.path.join(temp_dir, "certificates_with_qr.zip")
+                with zipfile.ZipFile(output_zip_path, "w") as output_zip:
+                    for img_file in image_files:
+                        filename = os.path.splitext(os.path.basename(img_file))[0]
+                        qr_url = f"https://www.teranis.in/verify?uc={filename}"
+
+                        output_img = Certification.add_qr_to_image(img_file, qr_url, coords=coordinates, logo_path="logo.png")
+
+                        output_img_path = os.path.join(temp_dir, f"{filename}.png")
+                        if output_img is not None:
+                            cv2.imwrite(output_img_path, output_img)
+                            output_zip.write(output_img_path, os.path.basename(output_img_path))
+
+                        # cv2.imwrite(output_img_path, output_img)
+
+                        # output_zip.write(output_img_path, os.path.basename(output_img_path))
+
+                with open(output_zip_path, "rb") as f:
+                    st.download_button("Download Certificates with QR", f, "certificates_with_qr.zip", "application/zip")
+
+
 
 
 # Footer
